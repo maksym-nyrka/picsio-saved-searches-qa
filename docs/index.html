@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saved Searches (Smart Collections) — Test Plan — Pics.io QA</title>
+<meta name="description" content="A UI and API test plan for Pics.io Saved Searches: 24 prioritised scenarios, with automation focused on the core set, plus metrics and reporting.">
+<link rel="stylesheet" href="assets/style.css?v=1793115442320">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111'/%3E%3Cpath d='M9 21l4-10h6l4 10h-3l-.8-2.2h-6.4L12 21H9zm4.6-4.6h4.8L16 11.4l-2.4 5z' fill='%23fff'/%3E%3C/svg%3E">
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <p class="eyebrow">Pics.io · QA take-home · Part 1</p>
+    <h1>Saved Searches (Smart Collections) — Test Plan</h1>
+    <p class="lede">A test plan for Saved Searches, grounded in a hands-on session on build <code>8.22.4</code> — 24 scenarios split into core and secondary, with automation focused on the core set, all scoped to UI and API testing.</p>
+    <p class="meta">
+      <span>27 Oct 2026</span>
+      <span>24 scenarios</span>
+      <a href="test-plan.md">Markdown source</a>
+    </p>
+  </div>
+</header>
+
+<div class="layout wrap">
+  <nav class="toc" aria-label="Table of contents">
+    <p class="toc-title">Contents</p>
+    <ol>
+          <li><a href="#1-summary">1. Summary</a></li>
+          <li><a href="#2-documented-behavior">2. Documented behavior</a></li>
+          <li><a href="#3-scope">3. Scope</a></li>
+          <li><a href="#4-scenarios">4. Scenarios</a></li>
+          <li><a href="#5-automation-strategy">5. Automation strategy</a></li>
+          <li><a href="#6-tools">6. Tools</a></li>
+          <li><a href="#7-metrics-and-benchmarks">7. Metrics and benchmarks</a></li>
+          <li><a href="#8-communicating-results">8. Communicating results</a></li>
+    </ol>
+  </nav>
+
+  <main id="content" class="content">
+<p><strong>Product:</strong> Pics.io DAM · <strong>Feature area:</strong> Search &amp; organise → Saved Searches · <strong>Author:</strong> Maksym Nyrka · <strong>Version:</strong> 1.0 · <strong>Date:</strong> 2026-10-27</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Scope</strong></td>
+<td>UI and API testing of Saved Searches: filter panel, save dialog, the Searches tree, and the endpoints behind them</td>
+</tr>
+<tr>
+<td><strong>Out of scope</strong></td>
+<td>Every other testing type and product area — see §3</td>
+</tr>
+<tr>
+<td><strong>Companion artefact</strong></td>
+<td>Playwright/TypeScript suite in this repository (<code>tests/</code>), implementing the automated subset in §5</td>
+</tr>
+<tr>
+<td><strong>Status</strong></td>
+<td>Written after a hands-on session on Pics.io web 8.23.1, 27 Oct 2026</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="1-summary">1. Summary<a class="anchor" href="#1-summary" aria-label="Link to this section">#</a></h2>
+<p>Saved Searches in Pics.io are <strong>Smart Collections</strong>: a saved set of filters that behaves like a folder whose contents update themselves. A user builds a query in the filter panel, clicks the save-search icon in the filter bar, names the collection in the <strong>Create saved search</strong> dialog, optionally drops it into a group and optionally shares it with the team; it then lives under the <strong>Searches</strong> tree and returns live results every time it is opened.</p>
+<p>I chose this feature because it sits on the product&#39;s central promise — <em>find the right asset</em> — and because its failures are <strong>silent</strong>. A broken upload shouts; a search that quietly omits 30 of 400 matching assets looks perfectly healthy and erodes trust in the whole library. That combination (high blast radius, low observability) is exactly where testing earns its keep.</p>
+<p>The plan is prioritised rather than exhaustive: 24 scenarios split into core and secondary, with automation focused on the core set. Everything is scoped to UI and API testing.</p>
+<p><strong>What can go wrong</strong></p>
+<ol>
+<li><strong>Wrong results</strong> from filter/operator combinations (AND/OR/negation, ranges, &quot;is not set&quot;).</li>
+<li><strong>Stale results</strong> — a Smart Collection that does not reflect a metadata change, or reflects it after an undefined delay.</li>
+<li><strong>State loss</strong> — criteria not surviving rename/move/reload, or orphaned entries after deletion.</li>
+<li><strong>Contract drift</strong> — a payload or status code changes and a client breaks without anyone noticing.</li>
+</ol>
+<hr>
+<h2 id="2-documented-behavior">2. Documented behavior<a class="anchor" href="#2-documented-behavior" aria-label="Link to this section">#</a></h2>
+<p>Source: Pics.io Help Center, May 2026.</p>
+<ul>
+<li>Any combination of filters — type, filename, keywords, description, colour, rating, share status, person, comment text, embedded EXIF/IPTC, custom <code>meta.*</code> fields — can be saved.</li>
+<li>Saving offers a name, a location (Personal root, Team root, or an existing group/subgroup), and a <strong>Share with my team</strong> toggle that defaults the location to Team root.</li>
+<li>Collections are organised in a tree with groups and subgroups, <strong>maximum 5 levels</strong>; duplicate names inside the same parent are rejected.</li>
+<li>Groups are a <em>visual</em> layer only — a group is not executable and children do not inherit filters.</li>
+<li>Each collection can be favourited (pinned), sorted by name or creation date, renamed inline, moved, and deleted (group deletion cascades with confirmation).</li>
+<li>Built-in collections ship by default: Duplicates (MD5-based), Restricted assets, by file type, by date, assigned to you; plus team-oriented ones (approved by / commented on by / uploaded by / assigned to).</li>
+<li>Access is via the magnifier (<strong>Searches</strong>) icon in the left panel; team collections follow team-saved-search permissions.</li>
+</ul>
+<hr>
+<h2 id="3-scope">3. Scope<a class="anchor" href="#3-scope" aria-label="Link to this section">#</a></h2>
+<p><strong>In scope.</strong> The UI and API of Saved Searches: the filter panel and its operators, the save dialog (name, location, share toggle, validation), the Searches tree (groups, nesting, rename, move, delete, favourites, sort), the empty, error and loading states around them, and the endpoints those screens call.</p>
+<p><strong>Out of scope.</strong> Everything else. This is a deliberate narrowing, not an oversight: no testing type outside UI and API, and no adjacent product area, is covered.</p>
+<p><strong>How UI testing is covered.</strong> Playwright drives the real interface against a seeded library: build a query, save it, find it in the tree, reopen it, run a different query and reopen again, delete it. Assertions are on what the user can see — tree contents, result counts, empty and error states — with a real pointer for hover-only actions and role-based locators (<code>treeitem</code>, <code>aria-expanded</code>, <code>data-id</code>) rather than generated class names.</p>
+<p><strong>How API testing is covered.</strong> Direct calls through Playwright&#39;s request context cover create, list, delete and search execution. Each response is asserted for status, shape (zod) and persisted state, including error bodies. The API also seeds and cleans fixtures, and acts as the oracle for UI result sets: the same query is executed through the screen and through the endpoint, and the returned IDs must match.</p>
+<p><strong>How the two fit together.</strong> One fixture, two lenses. The API proves the contract; the UI proves a user can reach the same state through the product. When they disagree, the failing layer tells us where the bug is.</p>
+<hr>
+<h2 id="4-scenarios">4. Scenarios<a class="anchor" href="#4-scenarios" aria-label="Link to this section">#</a></h2>
+<p>24 scenarios in two groups. Core covers the journey users repeat and the API contracts that make it true; secondary covers the edges that protect it.</p>
+<p><strong>Why core.</strong> If any of these fail, the feature is wrong or unusable — and usually silently. They cover save → open → re-run → delete, plus the calls that make each step true.</p>
+<p><strong>Why secondary.</strong> They protect the core from the sides: validation, nesting, ordering, operators, unicode and error paths. A failure here is narrower or more visible, so these are checked by hand rather than on every pull request.</p>
+<h3 id="core-scenarios">Core scenarios<a class="anchor" href="#core-scenarios" aria-label="Link to this section">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Layer</th>
+<th>Scenario</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TC-01</td>
+<td>UI</td>
+<td>Save a single-term search → it appears in the tree → opening it returns the same result set</td>
+</tr>
+<tr>
+<td>TC-02</td>
+<td>UI</td>
+<td>Save a multi-filter search (type + filename) → criteria round-trip exactly</td>
+</tr>
+<tr>
+<td>TC-03</td>
+<td>UI</td>
+<td>Reload / new session → collection and its results are identical</td>
+</tr>
+<tr>
+<td>TC-04</td>
+<td>UI</td>
+<td>Reopen a collection after another search → it re-runs its own query, not the last result set</td>
+</tr>
+<tr>
+<td>TC-05</td>
+<td>UI</td>
+<td>A zero-result search saves and opens with an explicit empty state, not an error or a spinner</td>
+</tr>
+<tr>
+<td>TC-06</td>
+<td>UI</td>
+<td>Delete a collection → gone from the tree, gone after reload, no orphaned entry</td>
+</tr>
+<tr>
+<td>TC-07</td>
+<td>API</td>
+<td><code>POST /savedSearches</code> stores the exact filter payload and returns the created node</td>
+</tr>
+<tr>
+<td>TC-08</td>
+<td>API</td>
+<td><code>GET /savedSearches</code> returns that node with the same criteria</td>
+</tr>
+<tr>
+<td>TC-09</td>
+<td>API</td>
+<td>Duplicate name in the same location → 409 with a structured error code</td>
+</tr>
+<tr>
+<td>TC-10</td>
+<td>API</td>
+<td><code>DELETE /savedSearches/:id</code> removes the node; a repeat delete is a clean 404</td>
+</tr>
+<tr>
+<td>TC-11</td>
+<td>API</td>
+<td><code>POST /images/search</code> executes the saved criteria and returns the expected set — the oracle for TC-01/02</td>
+</tr>
+<tr>
+<td>TC-12</td>
+<td>API</td>
+<td>Create-time validation rejects a filter payload the search endpoint cannot execute (4xx, nothing stored) — observed: currently 201, then 500 on open</td>
+</tr>
+</tbody></table></div>
+<h3 id="secondary-scenarios">Secondary scenarios<a class="anchor" href="#secondary-scenarios" aria-label="Link to this section">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Layer</th>
+<th>Scenario</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>TC-13</td>
+<td>UI</td>
+<td>Rename inline; duplicate name in the same parent rejected with a clear message</td>
+</tr>
+<tr>
+<td>TC-14</td>
+<td>UI</td>
+<td>Create group/subgroup, nest to 5 levels; the 6th attempt is blocked with the limit explained</td>
+</tr>
+<tr>
+<td>TC-15</td>
+<td>UI</td>
+<td>Move a collection between groups → filters and results unchanged</td>
+</tr>
+<tr>
+<td>TC-16</td>
+<td>UI</td>
+<td>Delete a non-empty group → confirmation names the impact; children removed</td>
+</tr>
+<tr>
+<td>TC-17</td>
+<td>UI</td>
+<td>Favourite pins to top; sort by name and creation date is stable</td>
+</tr>
+<tr>
+<td>TC-18</td>
+<td>UI</td>
+<td>Reload / back-forward restores results but loses the saved-search identity — observed: the URL carries filters, not <code>savedSearchId</code></td>
+</tr>
+<tr>
+<td>TC-19</td>
+<td>API</td>
+<td>Operator semantics: Is All Of vs Is Any Of vs Is None Of vs Is Not Set</td>
+</tr>
+<tr>
+<td>TC-20</td>
+<td>API</td>
+<td>Date operators (Today / Last 7 days / Range) at boundaries, including timezone</td>
+</tr>
+<tr>
+<td>TC-21</td>
+<td>API</td>
+<td>Multiple filenames in one filter (space-separated, per the docs)</td>
+</tr>
+<tr>
+<td>TC-22</td>
+<td>API</td>
+<td>Unicode, emoji and 255+ character names stored and returned intact</td>
+</tr>
+<tr>
+<td>TC-23</td>
+<td>API</td>
+<td>Built-in collections (Duplicates, Restricted, by type/date, assigned to me) return plausible sets</td>
+</tr>
+<tr>
+<td>TC-24</td>
+<td>API</td>
+<td>Replaying a create returns 409 and leaves one node; error bodies match the documented shape</td>
+</tr>
+</tbody></table></div>
+<hr>
+<h2 id="5-automation-strategy">5. Automation strategy<a class="anchor" href="#5-automation-strategy" aria-label="Link to this section">#</a></h2>
+<p><strong>Automation is limited to the core scenarios.</strong> They are the ones that carry the risk — save, open, re-run, delete, and the API contracts that make each step true — and time is finite, so the effort goes into a small suite that is trusted rather than a broad one that is skimmed. The rule: a test earns automation when it is deterministic, cheap to run, and expensive to miss; anything that needs human judgement or a retry to pass stays out.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Automated</th>
+<th>Why these</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UI</td>
+<td><span class="nw">TC-01 to TC-06</span></td>
+<td>The journey every user repeats, end to end: save, reopen, re-run, empty state, delete. Visible outcomes, no timing dependence.</td>
+</tr>
+<tr>
+<td>API</td>
+<td><span class="nw">TC-07 to TC-12</span></td>
+<td>Contracts and negatives are cheaper and more reliable through the API; TC-11 doubles as the oracle for UI result sets.</td>
+</tr>
+</tbody></table></div>
+<p><strong>Why not the rest.</strong> The secondary scenarios stay manual for now.</p>
+<p><strong>Shape</strong></p>
+<pre><code>API client + fixtures  →  helpers: seed and clean test data, no assertions
+      ↓
+UI E2E                 →  browser tests: save, open, re-run, empty state, delete
+      ↓
+API contract tests     →  endpoint tests: payload shape, statuses, error codes, oracle
+</code></pre>
+<p><strong>Selectors.</strong> Role + accessible name first (<code>getByRole(&#39;treeitem&#39;)</code>), <code>data-id</code> for identity, <code>data-testid</code> only where the app already provides it. Tree items are matched on their own label (<code>:scope &gt; …</code>), because a group&#39;s node also contains every child name. Never generated CSS Modules classes or <code>nth-child</code> chains. Tree actions render only on hover, so they must be driven with a real pointer rather than a synthetic click.</p>
+<p><strong>Assertions.</strong> Assert the visible outcome <em>and</em> cross-check the result set through the API. No <code>waitForTimeout</code>; web-first assertions only; <code>expect.poll</code> for result counts, because rendering trails the response.</p>
+<p><strong>Test data.</strong> A namespaced fixture (<code>qa-&lt;runId&gt;-</code>) seeded through the API, unique per run, torn down in a fixture. UI tests use the library that ships with the workspace (one asset whose filename contains &quot;bottles&quot;, one zero-result query) so assertions stay readable. The 50 built-in collections ship with the workspace, so tree-scale tests need no generation.</p>
+<p><strong>Auth.</strong> <code>storageState</code> captured once out-of-band and refreshed when it expires; no login UI in tests.</p>
+<p><strong>CI</strong></p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Trigger</th>
+<th>Content</th>
+<th>Budget</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Pull request</td>
+<td>Automated suite, Chromium</td>
+<td>≤ 5 min</td>
+</tr>
+<tr>
+<td>Nightly</td>
+<td>Automated suite</td>
+<td>≤ 20 min</td>
+</tr>
+<tr>
+<td>Release</td>
+<td>Nightly + exploratory charter + risk review</td>
+<td>—</td>
+</tr>
+</tbody></table></div>
+<p>Artifacts: HTML report, trace on first retry, video on failure.</p>
+<hr>
+<h2 id="6-tools">6. Tools<a class="anchor" href="#6-tools" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Tool</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UI automation</td>
+<td>Playwright + TypeScript</td>
+<td><code>@playwright/test</code>, Chromium project</td>
+</tr>
+<tr>
+<td>API / contract</td>
+<td>Playwright <code>request</code> + zod</td>
+<td>Fast negatives; no UI dependency</td>
+</tr>
+<tr>
+<td>Data seeding</td>
+<td>Pics.io API</td>
+<td>Keeps fixtures deterministic and fast</td>
+</tr>
+<tr>
+<td>CI / reporting</td>
+<td>GitHub Actions + HTML reporter</td>
+<td>Traces and videos as artifacts</td>
+</tr>
+<tr>
+<td>Test management</td>
+<td>Markdown in-repo + GitHub Issues</td>
+<td><code>TC-*</code> IDs are the traceability key</td>
+</tr>
+<tr>
+<td>AI assistance</td>
+<td>Claude Code</td>
+<td>Reads the docs and issue tracker, drafts test cases, writes and reviews the auto-tests, opens PRs and keeps documentation current</td>
+</tr>
+</tbody></table></div>
+<p><strong>AI — Claude Code</strong></p>
+<p>Claude Code is the AI tool in this workflow, used as the working assistant across the whole cycle. What that means concretely:</p>
+<ul>
+<li><strong>Connects to the documentation</strong> — reads the Pics.io Help Center pages directly, so §2 reflects what the product documents rather than recollection.</li>
+<li><strong>Navigates documentation and issues</strong> — traces a reported symptom back to the doc section or the open issue it relates to before a repro is written.</li>
+<li><strong>Connects to the issue tracker</strong> — scenarios and findings link to real tickets; nothing lives only in this document.</li>
+<li><strong>Creates test cases</strong> — drafts the scenario tables from documented behaviour plus the hands-on session; every expectation is verified by hand against the fixture.</li>
+<li><strong>Creates, updates and reviews auto-tests</strong> — writes and refactors the Playwright suite, and reviews each diff for flaky patterns (sleeps, brittle locators, shared state) before a PR is opened.</li>
+<li><strong>Creates pull requests</strong> — small, single-purpose PRs with the test report and traces attached.</li>
+<li><strong>Creates documentation</strong> — this plan, the suite README and the coverage map are drafted and kept current through it.</li>
+</ul>
+<hr>
+<h2 id="7-metrics-and-benchmarks">7. Metrics and benchmarks<a class="anchor" href="#7-metrics-and-benchmarks" aria-label="Link to this section">#</a></h2>
+<p>Thresholds below are <strong>hypotheses to calibrate</strong> after the first runs, not commitments invented in advance.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Target</th>
+<th>How measured</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Core scenarios passing on <code>main</code></td>
+<td>100%</td>
+<td>CI</td>
+</tr>
+<tr>
+<td>Flake rate</td>
+<td>&lt; 2% over 20 consecutive runs</td>
+<td>Retry telemetry, reviewed on every nightly run</td>
+</tr>
+<tr>
+<td>Result correctness</td>
+<td>0 mismatches on 50 sampled queries</td>
+<td>UI vs API oracle</td>
+</tr>
+<tr>
+<td>API schema failures</td>
+<td>0</td>
+<td>zod validation on every response</td>
+</tr>
+<tr>
+<td>API call time (create / list / search)</td>
+<td>Every call under 2 s in CI</td>
+<td>Playwright request timing; a slower call fails the run</td>
+</tr>
+<tr>
+<td>API coverage of the UI&#39;s endpoints</td>
+<td>100%</td>
+<td>Every endpoint the UI calls has at least one API test</td>
+</tr>
+<tr>
+<td>Escaped defects per release (search area)</td>
+<td>Trend down; 0 S1/S2</td>
+<td>Bug tracker</td>
+</tr>
+<tr>
+<td>Core scenarios covered by automation</td>
+<td>100%</td>
+<td>Coverage map</td>
+</tr>
+</tbody></table></div>
+<p>During the session, <code>GET /savedSearches</code> returned the 50 built-in nodes in ~2.4 KB, and <code>POST /images/search</code> returned 4–7 KB for four assets. Both are small enough that fixtures stay cheap, and the built-ins give the tree realistic scale without generation.</p>
+<hr>
+<h2 id="8-communicating-results">8. Communicating results<a class="anchor" href="#8-communicating-results" aria-label="Link to this section">#</a></h2>
+<p><strong>Two layers: this plan (stable) and a release report (per release)</strong></p>
+<ul>
+<li><strong>This plan</strong> is the stable layer — scope, scenarios, strategy. It changes when the feature or the strategy changes, not when a release ships.</li>
+<li><strong>The release report</strong> (<code>docs/releases/&lt;version&gt;.md</code>, created from <code>_template.md</code>) is the repeating layer: for one release, the suites and cases that ran — automated and manual — with results, open findings, risks, and an explicit go/no-go recommendation. The automated half is filled straight from the CI run; only the manual rows need a human.</li>
+</ul>
+<p>Each release report carries a frozen <strong>coverage map</strong> — scenario ID → automated/manual → result for that release — so &quot;is this covered?&quot; is one lookup, and coverage growth is visible across the sequence of reports. Reports reference <code>TC-*</code> IDs and record only what is true for that release; scenario definitions live in this plan and nowhere else, so the reports cannot drift apart from it.</p>
+<ul>
+<li><strong>Bug report</strong>: title = user-visible symptom; environment; minimal repro; expected vs actual; evidence (trace/video/screenshot); impact and severity; suspected area. No &quot;steps: 1. open app&quot;.</li>
+</ul>
+<p><strong>Severity</strong></p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Definition</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S1</td>
+<td>Data loss</td>
+<td>Deleting a group also removes collections outside it</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>Silently wrong results / core journey blocked</td>
+<td>Filter combination omits matching assets</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>Degraded but workable</td>
+<td>Rename fails until reload</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>Cosmetic</td>
+<td>Misaligned tree icon</td>
+</tr>
+</tbody></table></div>
+<p><strong>Cadence and audience</strong></p>
+<ul>
+<li>Daily: async note in the ticket — what was tested, what broke, what is blocked.</li>
+<li>Daily standup: 5-minute sync with the team — testing progress since yesterday, ongoing issues, and anything blocking the build.</li>
+<li>Weekly: 15-minute quality review with dev + PM on the open issues and flake trend.</li>
+<li>Pre-release: one-page readiness note, 24 h ahead, with a clear recommendation.</li>
+<li>Devs get traces and precise repro; PM gets risk and user impact; support gets known issues and workarounds; leadership gets the one-pager.</li>
+</ul>
+<p><strong>Definition of done for a finding:</strong> reproducible, isolated to the smallest step set, evidenced, and with impact stated in user terms. A bug that cannot be reproduced is a question, not a bug.</p>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Generated from <code>docs/test-plan.md</code> with <code>npm run docs</code>. Source of truth is the Markdown file.</p>
+  </div>
+</footer>
+</body>
+</html>
